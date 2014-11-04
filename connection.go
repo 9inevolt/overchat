@@ -34,6 +34,7 @@ type Connection struct {
 	lastactive     time.Time
 	ping           chan time.Time
 	sync.RWMutex
+	room           string
 }
 
 type SimplifiedUser struct {
@@ -53,6 +54,7 @@ type EventDataOut struct {
 	Timestamp    int64  `json:"timestamp"`
 	Data         string `json:"data,omitempty"`
 	Extradata    string `json:"extradata,omitempty"`
+	Room         string `json:"room,omitempty"`
 }
 
 type BanIn struct {
@@ -70,10 +72,11 @@ type PingOut struct {
 type message struct {
 	event string
 	data  interface{}
+	eventdata *EventDataOut
 }
 
 // Create a new connection using the specified socket and router.
-func newConnection(s *websocket.Conn, user *User) {
+func newConnection(s *websocket.Conn, user *User, room string) {
 	c := &Connection{
 		socket:         s,
 		send:           make(chan *message, SENDCHANNELSIZE),
@@ -85,6 +88,7 @@ func newConnection(s *websocket.Conn, user *User) {
 		lastactive:     time.Now(),
 		ping:           make(chan time.Time, 2),
 		RWMutex:        sync.RWMutex{},
+		room:           room,
 	}
 
 	go c.writePumpText()
@@ -276,6 +280,7 @@ func (c *Connection) Broadcast(event string, data *EventDataOut) {
 	m := &message{
 		event: event,
 		data:  marshalled,
+		eventdata: data,
 	}
 	hub.broadcast <- m
 	if event != "JOIN" && event != "QUIT" {
@@ -427,6 +432,7 @@ func (c *Connection) OnMsg(data []byte) {
 
 	out := c.getEventDataOut()
 	out.Data = msg
+	out.Room = c.room
 	c.Broadcast("MSG", out)
 }
 
@@ -441,8 +447,8 @@ func (c *Connection) OnPrivmsg(data []byte) {
 
 func (c *Connection) Names() {
 	c.sendmarshalled <- &message{
-		"NAMES",
-		namescache.getNames(),
+		event: "NAMES",
+		data: namescache.getNames(),
 	}
 }
 

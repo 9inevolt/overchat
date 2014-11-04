@@ -156,7 +156,17 @@ func Handler(socket *websocket.Conn) {
 		return
 	}
 
-	newConnection(socket, user)
+	room, rooms := "", r.URL.Query()["room"]
+	if len(rooms) > 0 {
+	    room = rooms[0]
+	}
+
+	if !IsValidRoomName(room) {
+		websocket.Message.Send(socket, `ERR "noroom"`)
+		return
+	}
+
+	newConnection(socket, user, room)
 }
 
 func unixMilliTime() int64 {
