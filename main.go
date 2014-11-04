@@ -94,8 +94,8 @@ func main() {
 	redisdb, _ := c.GetInt64("redis", "database")
 	redispw, _ := c.GetString("redis", "password")
 
-	dbtype, _ := c.GetString("database", "type")
-	dbdsn, _ := c.GetString("database", "dsn")
+	//dbtype, _ := c.GetString("database", "type")
+	//dbdsn, _ := c.GetString("database", "dsn")
 
 	if processes <= 0 {
 		processes = int64(runtime.NumCPU())
@@ -127,14 +127,17 @@ func main() {
 	initWatchdog()
 	initNamesCache()
 	initHub()
-	initDatabase(dbtype, dbdsn)
+	// Disable database for now
+	//initDatabase(dbtype, dbdsn)
 	initRedis(redisaddr, redisdb, redispw)
 
 	initBroadcast(redisdb)
-	initBans(redisdb)
+	// Disable bans for now
+	//initBans(redisdb)
 	initUsers(redisdb)
 
-	http.Handle("/ws", websocket.Handler(Handler))
+	s := websocket.Server{Handler: Handler}
+	http.Handle("/ws", websocket.Server(s))
 
 	fmt.Printf("Using %v threads, and listening on: %v\n", processes, addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
@@ -146,6 +149,7 @@ func Handler(socket *websocket.Conn) {
 	defer socket.Close()
 	r := socket.Request()
 	user, banned := getUserFromWebRequest(r)
+//	user, banned := dummyUser(), false
 
 	if banned {
 		websocket.Message.Send(socket, `ERR "banned"`)

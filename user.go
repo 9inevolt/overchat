@@ -1,12 +1,12 @@
 package main
 
 import (
-	"encoding/json"
+	_ "encoding/json"
 	"fmt"
-	redis "github.com/vmihailenco/redis/v2"
-	"io/ioutil"
+	redis "github.com/vmihailenco/redis"
+	_ "io/ioutil"
 	"net/http"
-	"net/url"
+	_ "net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,7 +22,7 @@ type userTools struct {
 }
 
 var (
-	cookievalid = regexp.MustCompile("^[a-z0-9]{32}$")
+	cookievalid = regexp.MustCompile("^[a-z0-9]{20,}$")
 	usertools   = userTools{
 		nicklookup:  make(map[string]*uidprot),
 		nicklock:    sync.RWMutex{},
@@ -59,7 +59,8 @@ type sessionUser struct {
 }
 
 func initUsers(redisdb int64) {
-	go usertools.setupRefreshUser(redisdb)
+// No RefreshUser for now
+//	go usertools.setupRefreshUser(redisdb)
 }
 
 func (ut *userTools) getUseridForNick(nick string) (Userid, bool) {
@@ -96,6 +97,7 @@ func (ut *userTools) addUser(u *User, force bool) {
 	ut.nicklookup[lowernick] = &uidprot{u.id, u.isProtected()}
 }
 
+/* No RefreshUser for now
 func (ut *userTools) setupRefreshUser(redisdb int64) {
 	refreshuser := ut.getRefreshUserChan(redisdb)
 	t := time.NewTicker(time.Minute)
@@ -122,6 +124,7 @@ func (ut *userTools) setupRefreshUser(redisdb int64) {
 		}
 	}
 }
+*/
 
 func (ut *userTools) getRefreshUserChan(redisdb int64) chan *redis.Message {
 refreshuseragain:
@@ -156,22 +159,10 @@ type User struct {
 	sync.RWMutex
 }
 
-func userfromSession(m []byte, forceupdate bool) (u *User) {
-	var su sessionUser
-	err := json.Unmarshal(m, &su)
-	if err != nil {
-		D("Unable to unmarshal sessionuser string: ", string(m))
-		return
-	}
-
-	uid, err := strconv.ParseInt(su.UserId, 10, 32)
-	if err != nil {
-		return
-	}
-
+func dummyUser() (u *User) {
 	u = &User{
-		id:              Userid(uid),
-		nick:            su.Username,
+		id:              Userid(1),
+		nick:            "dummy",
 		features:        0,
 		lastmessage:     nil,
 		lastmessagetime: time.Time{},
@@ -182,7 +173,33 @@ func userfromSession(m []byte, forceupdate bool) (u *User) {
 		RWMutex:         sync.RWMutex{},
 	}
 
-	u.setFeatures(su.Features)
+	u.setFeatures([]string{"flair1", "flair2", "flair3"}[0:])
+	u.assembleSimplifiedUser()
+	usertools.addUser(u, false)
+        return
+}
+
+func userfromSession(m map[string]string, forceupdate bool) (u *User) {
+	uid, err := strconv.ParseInt(m["user_id"], 10, 32)
+	if err != nil {
+		return
+	}
+
+	u = &User{
+		id:              Userid(uid),
+		nick:            m["user_name"],
+		features:        0,
+		lastmessage:     nil,
+		lastmessagetime: time.Time{},
+		lastactive:      time.Time{},
+		delayscale:      1,
+		simplified:      nil,
+		connections:     0,
+		RWMutex:         sync.RWMutex{},
+	}
+
+	// no features for now
+	//u.setFeatures(su.Features)
 	u.assembleSimplifiedUser()
 	usertools.addUser(u, forceupdate)
 	return
@@ -308,20 +325,22 @@ func getUserFromWebRequest(r *http.Request) (user *User, banned bool) {
 		return
 	}
 
-	var authdata []byte
+	var authdata map[string]string
 	// set up the user here from redis if the user has a session cookie
-	sessionid, err := r.Cookie("sid")
+	sessionid, err := r.Cookie("PHPSESSID")
 	if err == nil {
 		if !cookievalid.MatchString(sessionid.Value) {
 			return
 		}
 
-		sess := rds.Get(fmt.Sprintf("CHAT:session-%v", sessionid.Value))
+		sess := rds.HGetAllMap(fmt.Sprintf("session:%v", sessionid.Value))
 		if sess.Err() != nil {
 			return
 		}
-		authdata = []byte(sess.Val())
-	} else {
+		authdata = sess.Val()
+	}
+	// no authtokens for now
+	/*else {
 		// try authtoken auth
 		authtoken, err := r.Cookie("authtoken")
 		if err != nil || !cookievalid.MatchString(authtoken.Value) {
@@ -338,7 +357,7 @@ func getUserFromWebRequest(r *http.Request) (user *User, banned bool) {
 		}
 
 		authdata, _ = ioutil.ReadAll(resp.Body)
-	}
+	}*/
 
 	user = userfromSession(authdata, false)
 	if user == nil {
@@ -353,5 +372,6 @@ func getUserFromWebRequest(r *http.Request) (user *User, banned bool) {
 	cacheIPForUser(user.id, ip)
 	// there is only ever one single "user" struct, the namescache makes sure of that
 	user = namescache.add(user)
+	D("user joined: " + user.nick)
 	return
 }

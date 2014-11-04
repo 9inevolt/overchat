@@ -183,19 +183,24 @@ func (c *Connection) writePumpText() {
 				c.Ping()
 			} else if interval > PINGTIMEOUT {
 				// disconnect user, stop goroutines
+				D("PINGTIMEOUT")
 				return
 			}
 		case <-c.banned:
+			D("banned")
 			websocket.Message.Send(c.socket, `ERR "banned"`)
 			return
 		case <-c.stop:
+			D("stop")
 			return
 		case m := <-c.blocksend:
+			D("blocksend")
 			c.rlockUserIfExists()
 			if data, err := Marshal(m.data); err == nil {
 				c.runlockUserIfExists()
 				if data, err := Pack(m.event, data); err == nil {
 					if err := websocket.Message.Send(c.socket, string(data)); err != nil {
+						D("blocksend err")
 						return
 					}
 				}
@@ -203,11 +208,15 @@ func (c *Connection) writePumpText() {
 				c.runlockUserIfExists()
 			}
 		case m := <-c.send:
+			if (c.user != nil) {
+			    D("send: " + c.user.nick)
+			}
 			c.rlockUserIfExists()
 			if data, err := Marshal(m.data); err == nil {
 				c.runlockUserIfExists()
 				if data, err := Pack(m.event, data); err == nil {
 					if err := websocket.Message.Send(c.socket, string(data)); err != nil {
+						D("send err")
 						return
 					}
 				}
@@ -215,6 +224,9 @@ func (c *Connection) writePumpText() {
 				c.runlockUserIfExists()
 			}
 		case message := <-c.sendmarshalled:
+			if (c.user != nil) {
+			    D("message: " + c.user.nick)
+			}
 			data := message.data.([]byte)
 			if data, err := Pack(message.event, data); err == nil {
 				if err := websocket.Message.Send(c.socket, string(data)); err != nil {
@@ -268,7 +280,8 @@ func (c *Connection) Broadcast(event string, data *EventDataOut) {
 	hub.broadcast <- m
 	if event != "JOIN" && event != "QUIT" {
 		// by definition only users can send messages
-		db.insertChatEvent(c.user.id, event, data)
+		// no chat event logging for now
+		// db.insertChatEvent(c.user.id, event, data)
 	}
 }
 
