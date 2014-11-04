@@ -370,8 +370,7 @@ func getUserFromWebRequest(r *http.Request) (user *User, banned bool) {
 	}
 
 	cacheIPForUser(user.id, ip)
-	// there is only ever one single "user" struct, the namescache makes sure of that
-	user = namescache.add(user)
-	D("user joined: " + user.nick)
+	// cache names per room in connection instead
+	// user = namescache.add(user)
 	return
 }

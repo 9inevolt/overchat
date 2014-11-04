@@ -97,7 +97,7 @@ func newConnection(s *websocket.Conn, user *User, room string) {
 
 func (c *Connection) readPumpText() {
 	defer func() {
-		namescache.disconnect(c.user)
+		namescache.disconnect(c)
 		c.Quit()
 		c.socket.Close()
 	}()
@@ -111,10 +111,9 @@ func (c *Connection) readPumpText() {
 			return
 		}
 		c.runlockUserIfExists()
-	} else {
-		namescache.addConnection()
 	}
 
+	namescache.addConnection(c)
 	hub.register <- c
 	c.Names()
 	c.Join() // broadcast to the chat that a user has connected
@@ -309,6 +308,7 @@ func (c *Connection) getEventDataOut() *EventDataOut {
 		out.SimplifiedUser = c.user.simplified
 	}
 	out.Timestamp = unixMilliTime()
+	out.Room = c.room
 	return out
 }
 
@@ -432,7 +432,6 @@ func (c *Connection) OnMsg(data []byte) {
 
 	out := c.getEventDataOut()
 	out.Data = msg
-	out.Room = c.room
 	c.Broadcast("MSG", out)
 }
 
@@ -446,9 +445,14 @@ func (c *Connection) OnPrivmsg(data []byte) {
 }
 
 func (c *Connection) Names() {
+	names := namescache.getNamesInRoom(c.room)
+	if names == nil {
+		return
+	}
+
 	c.sendmarshalled <- &message{
 		event: "NAMES",
-		data: namescache.getNames(),
+		data: names,
 	}
 }
 

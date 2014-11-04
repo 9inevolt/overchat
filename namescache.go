@@ -9,6 +9,8 @@ type namesCache struct {
 	users           map[Userid]*User
 	marshallednames []byte
 	usercount       uint32
+	rooms           map[string]map[Userid]*User
+	marshalledrooms map[string][]byte
 	ircnames        [][]string
 	sync.RWMutex
 }
@@ -26,6 +28,8 @@ type NamesOut struct {
 var namescache = namesCache{
 	users:   make(map[Userid]*User),
 	RWMutex: sync.RWMutex{},
+	rooms:   make(map[string]map[Userid]*User),
+	marshalledrooms: make(map[string][]byte),
 }
 
 func initNamesCache() {
@@ -35,6 +39,27 @@ func (nc *namesCache) getIrcNames() [][]string {
 	nc.RLock()
 	defer nc.RUnlock()
 	return nc.ircnames
+}
+
+func (nc *namesCache) marshalRoom(room string) {
+	users := make([]*SimplifiedUser, 0, len(nc.rooms[room]))
+	for _, u := range nc.rooms[room] {
+		u.RLock()
+		if u.connections <= 0 {
+			continue
+		}
+		users = append(users, u.simplified)
+	}
+
+	nc.marshalledrooms[room], _ = Marshal(&NamesOut{
+		Users:       users,
+		Connections: nc.usercount,
+	})
+
+	for _, u := range nc.rooms[room] {
+		u.RUnlock()
+	}
+
 }
 
 func (nc *namesCache) marshalNames(updateircnames bool) {
@@ -99,6 +124,12 @@ func (nc *namesCache) getNames() []byte {
 	return nc.marshallednames
 }
 
+func (nc *namesCache) getNamesInRoom(room string) []byte {
+	nc.RLock()
+	defer nc.RUnlock()
+	return nc.marshalledrooms[room]
+}
+
 func (nc *namesCache) add(user *User) *User {
 	nc.Lock()
 	defer nc.Unlock()
@@ -121,26 +152,30 @@ func (nc *namesCache) add(user *User) *User {
 	return nc.users[user.id]
 }
 
-func (nc *namesCache) disconnect(user *User) {
+func (nc *namesCache) disconnect(c *Connection) {
+	user := c.user
 	nc.Lock()
 	defer nc.Unlock()
-	var updateircnames bool
+	nc.usercount--
 
-	if user != nil {
-		nc.usercount--
-		if u, ok := nc.users[user.id]; ok {
-			conncount := atomic.AddInt32(&u.connections, -1)
-			if conncount <= 0 {
-				// we do not delete the users so that the lastmessage is preserved for
-				// anti-spam purposes, sadly this means memory usage can only go up
-				updateircnames = true
-			}
-		}
-
-	} else {
-		nc.usercount--
+	if user == nil {
+		return
 	}
-	nc.marshalNames(updateircnames)
+
+	room := nc.rooms[c.room]
+	if room == nil {
+		return
+	}
+
+	u := room[user.id]
+	if u == nil {
+		return
+	}
+
+	atomic.AddInt32(&u.connections, -1)
+	// we do not delete the users so that the lastmessage is preserved for
+	// anti-spam purposes, sadly this means memory usage can only go up
+	nc.marshalRoom(c.room)
 }
 
 func (nc *namesCache) refresh(user *User) {
@@ -158,9 +193,35 @@ func (nc *namesCache) refresh(user *User) {
 	}
 }
 
-func (nc *namesCache) addConnection() {
+func (nc *namesCache) addConnection(c *Connection) {
 	nc.Lock()
 	defer nc.Unlock()
 	nc.usercount++
-	nc.marshalNames(false)
+	user := c.user
+
+	if user == nil {
+		return
+	}
+
+	room := nc.rooms[c.room]
+	if room == nil {
+		room = make(map[Userid]*User)
+		nc.rooms[c.room] = room
+	}
+
+	u := room[user.id]
+	if u == nil {
+		su := &SimplifiedUser{
+			Nick:     user.nick,
+			Features: user.simplified.Features,
+		}
+		user.simplified = su
+		u = user
+		room[user.id] = u
+	}
+
+	atomic.AddInt32(&u.connections, 1)
+	// assign back to avoid duplicate users
+	c.user = u
+	nc.marshalRoom(c.room)
 }
